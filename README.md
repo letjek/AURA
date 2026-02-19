@@ -356,6 +356,7 @@ AURA/
 
 ## 🔮 Roadmap
 
+### Features
 - [ ] WhatsApp integration (via WhatsApp Business API)
 - [ ] MQTT publish/subscribe
 - [ ] Voice commands (I2S microphone)
@@ -364,6 +365,18 @@ AURA/
 - [ ] Rule engine (if temp > 30 → turn on fan)
 - [ ] More sensor libraries (BMP280, SHT31, VEML7700)
 - [ ] Dashboard charts (historical data)
+
+### 🔒 Security Hardening
+- [ ] **Web UI authentication** — HTTP Basic Auth or token-based login to protect the config panel from unauthorized access on the local network
+- [ ] **HTTPS / TLS** — serve the web interface over TLS using a self-signed cert stored in SPIFFS, preventing plaintext credential exposure
+- [ ] **MQTT TLS** — encrypted broker connection with client certificate support (`PubSubClient` + `WiFiClientSecure`)
+- [ ] **API key storage encryption** — encrypt LLM API keys and Telegram tokens at rest in SPIFFS using AES (ESP32 hardware accelerated)
+- [ ] **Prompt injection hardening** — sanitize and length-limit incoming Telegram/chat messages before they are forwarded to the LLM, preventing prompt manipulation attacks
+- [ ] **LLM response validation** — verify that action JSON emitted by the LLM only targets declared actuators and valid pin states before execution
+- [ ] **Rate limiting** — cap Telegram and web API requests per time window to prevent abuse or unintentional command flooding
+- [ ] **Actuator safety guards** — configurable min/max bounds per actuator (e.g. PWM never exceeds a safe duty cycle) that the firmware enforces regardless of LLM output
+- [ ] **Secure AP mode** — replace the hardcoded `aura1234` AP password with a device-unique default derived from chip ID
+- [ ] **Audit log** — append-only SPIFFS log of actuator state changes with timestamps, source (Telegram / Web / LLM), and triggering message
 
 ---
 
