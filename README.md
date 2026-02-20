@@ -172,25 +172,64 @@ AURA: Sure! I'm turning on the LED and setting the fan speed to 50%.
 
 ---
 
-## 📦 Adding New Sensor Libraries
+## 📦 Adding a Custom Sensor
 
-Edit `src/main.cpp` and `include/AuraSensors.h`:
+AURA uses a **plugin file** (`src/custom.cpp`) so you never need to edit the core headers. All custom sensor types, libraries, and init code go in one place.
+
+### How it works
+
+`custom.cpp` spawns a FreeRTOS task (`customSensorTask`) that runs alongside the main loop. It reads your custom sensor and writes results directly into `Storage.sensors[]` — `buildContextForLLM()` picks them up automatically.
+
+### Steps
+
+**1. Name your sensor type in the Web UI**
+
+Go to `http://aura.local` → **I/O Config** → add a sensor slot and set its **Type** to your chosen type string (e.g. `aht10_temp`). The name is arbitrary — you match it in code.
+
+**2. Add the library to `platformio.ini`**
+
+```ini
+lib_deps =
+  ; ... existing deps ...
+  adafruit/Adafruit AHTX0@^2.0.5   ; ← add your library here
+```
+
+**3. Edit `src/custom.cpp`**
 
 ```cpp
-// 1. Add to platformio.ini lib_deps:
-//    adafruit/DHT sensor library@^1.4.4
+// ① Uncomment (or add) the include at the top
+#include <Adafruit_AHTX0.h>
 
-// 2. In AuraSensors.h, uncomment:
-#include <DHT.h>
-DHT dht(4, DHT22);
+// ② Declare the driver instance (file-scope, before the task function)
+static Adafruit_AHTX0 _aht;
+static bool           _ahtReady = false;
 
-// 3. In readSensor(), add case:
-} else if (strcmp(s.type, "dht22") == 0) {
-  float temp = dht.readTemperature();
-  s.last_value = temp;
-  snprintf(s.last_str, sizeof(s.last_str), "%.1f", temp);
+// ③ In customSensorTask — one-time init block (runs once before the loop)
+_ahtReady = _aht.begin();
+Serial.println(_ahtReady ? "[Custom] AHT10 ready" : "[Custom] AHT10 not found");
+
+// ④ In the read loop — match your type string and write into the slot
+if (strcmp(s.type, "aht10_temp") == 0 && _ahtReady) {
+  sensors_event_t h, t;
+  _aht.getEvent(&h, &t);
+  s.last_value = t.temperature;
+  snprintf(s.last_str, sizeof(s.last_str), "%.1f", t.temperature);
+}
+else if (strcmp(s.type, "aht10_hum") == 0 && _ahtReady) {
+  sensors_event_t h, t;
+  _aht.getEvent(&h, &t);
+  s.last_value = h.relative_humidity;
+  snprintf(s.last_str, sizeof(s.last_str), "%.1f", h.relative_humidity);
 }
 ```
+
+**4. Flash**
+
+```bash
+pio run --target upload --environment esp32
+```
+
+No changes to `main.cpp` or `AuraSensors.h` needed.
 
 ---
 
@@ -227,40 +266,39 @@ lib_deps =
   adafruit/Adafruit AHTX0@^2.0.5      ; ← add this
 ```
 
-### 2. Add AHT10 driver to `include/AuraSensors.h`
+### 2. Edit `src/custom.cpp`
 
-At the top of the file, after the existing includes:
+Uncomment the relevant lines (the file ships with AHT10 as the reference example):
 
 ```cpp
 #include <Adafruit_AHTX0.h>
-Adafruit_AHTX0 aht;
-bool ahtReady = false;
+
+static Adafruit_AHTX0 _aht;
+static bool           _ahtReady = false;
 ```
 
-In the `begin()` or `initPins()` method, initialize the sensor:
+In the one-time init block inside `customSensorTask`:
 
 ```cpp
-ahtReady = aht.begin();
-if (!ahtReady) Serial.println("[Sensors] AHT10 not found");
+_ahtReady = _aht.begin();
+if (_ahtReady) Serial.println("[Custom] AHT10 ready");
+else           Serial.println("[Custom] AHT10 not found");
 ```
 
-In the `readSensor()` method, add a case for type `"aht10"`:
+In the read loop:
 
 ```cpp
-} else if (strcmp(s.type, "aht10_temp") == 0) {
-  if (ahtReady) {
-    sensors_event_t hum, temp;
-    aht.getEvent(&hum, &temp);
-    s.last_value = temp.temperature;
-    snprintf(s.last_str, sizeof(s.last_str), "%.1f", temp.temperature);
-  }
-} else if (strcmp(s.type, "aht10_hum") == 0) {
-  if (ahtReady) {
-    sensors_event_t hum, temp;
-    aht.getEvent(&hum, &temp);
-    s.last_value = hum.relative_humidity;
-    snprintf(s.last_str, sizeof(s.last_str), "%.1f", hum.relative_humidity);
-  }
+if (strcmp(s.type, "aht10_temp") == 0 && _ahtReady) {
+  sensors_event_t h, t;
+  _aht.getEvent(&h, &t);
+  s.last_value = t.temperature;
+  snprintf(s.last_str, sizeof(s.last_str), "%.1f", t.temperature);
+}
+else if (strcmp(s.type, "aht10_hum") == 0 && _ahtReady) {
+  sensors_event_t h, t;
+  _aht.getEvent(&h, &t);
+  s.last_value = h.relative_humidity;
+  snprintf(s.last_str, sizeof(s.last_str), "%.1f", h.relative_humidity);
 }
 ```
 
@@ -333,16 +371,112 @@ AURA: "Understood. Turning off the relay."
 
 ---
 
+## 🔗 Multi-Device MQTT
+
+Multiple AURA nodes on the same network can share sensor readings and control each other's actuators through any MQTT broker (Mosquitto, HiveMQ, etc.). No cloud required — a Raspberry Pi running Mosquitto on the same LAN works perfectly.
+
+### Topic Scheme
+
+| Topic | Direction | Payload |
+|-------|-----------|---------|
+| `aura/{chipId}/sensors/{name}` | Device publishes | Raw reading string |
+| `aura/{chipId}/cmd/{name}` | Device receives | `{"state":true}` or `{"state":true,"pwm":128}` |
+| `aura/{chipId}/status` | Device publishes | `{"ip":"...","heap":...,"uptime":...}` |
+
+Each device's `chipId` is `aura-` followed by the lower 32 bits of its MAC address (e.g. `aura-1a2b3c4d`). It is printed to serial on boot:
+
+```
+[MQTT] Started — device id: aura-1a2b3c4d
+```
+
+You can also see it live on the `aura/+/status` topic.
+
+### Setup
+
+**1. Configure the broker in the Web UI**
+
+Go to `http://aura.local` → **⚙️ System** tab → enter your broker host and port (default `1883`) → Save & Restart.
+
+**2. Enable MQTT in `custom.cpp`**
+
+`custom.cpp` already calls `MQTT.begin()` on WiFi connect — nothing extra needed. Every local sensor is automatically published at the `SENSOR_READ_INTERVAL_MS` rate.
+
+### Consuming a Remote Sensor
+
+Add a sensor slot on the *receiving* node:
+
+| Field | Value |
+|-------|-------|
+| Name | `{remoteChipId}/{sensorName}` (e.g. `aura-1a2b3c4d/Temperature`) |
+| Type | `mqtt_remote` |
+| Unit | whatever the remote publishes |
+
+When the remote node publishes `aura/aura-1a2b3c4d/sensors/Temperature`, the value is written into that slot automatically and appears in the LLM context and Web UI dashboard.
+
+### Controlling a Remote Actuator
+
+Add an actuator slot on the *controlling* node:
+
+| Field | Value |
+|-------|-------|
+| Name | `{remoteChipId}/{actuatorName}` (e.g. `aura-1a2b3c4d/Fan`) |
+| Type | `mqtt` |
+
+When the LLM (or Web UI) calls `setActuator("aura-1a2b3c4d/Fan", true)`, the MQTT task detects the state change and publishes:
+
+```
+aura/aura-1a2b3c4d/cmd/Fan  →  {"state":true}
+```
+
+The remote node receives it and activates its local `Fan` actuator.
+
+### Example: Two Nodes, Shared Climate Control
+
+```
+Node A (sensor node)                Node B (actuator node)
+─────────────────────               ──────────────────────
+Sensor: Temperature  aht10_temp     Actuator: Fan  digital  GPIO26
+Sensor: Humidity     aht10_hum      Actuator: Pump digital  GPIO27
+
+                        MQTT Broker
+                       ─────────────
+              aura/aura-AAAA/sensors/Temperature  →  Node B reads as mqtt_remote
+              aura/aura-AAAA/sensors/Humidity     →  Node B reads as mqtt_remote
+              aura/aura-BBBB/cmd/Fan              ←  Node B controls locally
+```
+
+On Node B, configure:
+
+**Sensors (remote):**
+
+| Name | Type | Unit |
+|------|------|------|
+| `aura-AAAA/Temperature` | `mqtt_remote` | °C |
+| `aura-AAAA/Humidity` | `mqtt_remote` | % |
+
+**Actuators (local):**
+
+| Name | Type | Pin |
+|------|------|-----|
+| Fan | `digital` | 26 |
+| Pump | `digital` | 27 |
+
+Node B's LLM context will include the remote sensor values and can control the local actuators in response.
+
+---
+
 ## 🗂 Project Structure
 
 ```
 AURA/
 ├── src/
-│   └── main.cpp              # Entry point
+│   ├── main.cpp              # Entry point — do not edit for custom sensors
+│   └── custom.cpp            # Plugin file — add custom sensors & MQTT here
 ├── include/
 │   ├── AuraConfig.h          # Constants & pin definitions
 │   ├── AuraStorage.h         # SPIFFS config persistence
-│   ├── AuraSensors.h         # Sensor & actuator manager
+│   ├── AuraSensors.h         # Sensor & actuator manager (built-in types)
+│   ├── AuraMQTT.h            # Multi-device MQTT bridge
 │   ├── AuraLLM.h             # Multi-provider LLM client
 │   ├── AuraTelegram.h        # Telegram bot
 │   ├── AuraWiFi.h            # WiFi + AP captive portal
@@ -357,8 +491,8 @@ AURA/
 ## 🔮 Roadmap
 
 ### Features
+- [x] MQTT publish/subscribe (multi-device sensor sharing & remote actuator control)
 - [ ] WhatsApp integration (via WhatsApp Business API)
-- [ ] MQTT publish/subscribe
 - [ ] Voice commands (I2S microphone)
 - [ ] OTA firmware updates from Web UI
 - [ ] BLE configuration (no WiFi needed for setup)
