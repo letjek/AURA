@@ -1,0 +1,41 @@
+{
+  "name": "AURA",
+  "version": "0.1.0",
+  "description": "On-device intelligence for microcontrollers: a built-in primary hardware model (GPIO/ADC/PWM/I2C sensors and actuators, bilingual EN/ID), swappable TOON knowledge models, and a WebAssembly (wasm3) runtime — behind a chat-style web UI.",
+  "keywords": [
+    "esp32",
+    "wasm",
+    "webassembly",
+    "iot",
+    "automation",
+    "agent",
+    "ai",
+    "edge"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/letjek/AURA.git"
+  },
+  "authors": [
+    {
+      "name": "letjek",
+      "url": "https://github.com/letjek",
+      "maintainer": true
+    }
+  ],
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "headers": "AURA.h",
+  "dependencies": {
+    "wasm3/Wasm3": "^0.5.0"
+  },
+  "export": {
+    "exclude": [
+      ".vscode",
+      "extras/legacy-prototype",
+      "**/.pio",
+      "**/.DS_Store"
+    ]
+  }
+}

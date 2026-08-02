@@ -1,0 +1,11 @@
+#######################################
+# Syntax coloring map for AURA
+#######################################
+
+AURA	KEYWORD1
+AuraClass	KEYWORD1
+Config	KEYWORD1
+
+begin	KEYWORD2
+loop	KEYWORD2
+ask	KEYWORD2
